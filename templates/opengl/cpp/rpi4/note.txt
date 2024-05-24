@@ -1,0 +1,7 @@
+Simple triangle template for OpenGL ES development on Raspberry Pi 4 Model B.
+
+Developing on Ubuntu. Needed to acquire these two packages:
+
+sudo apt-get install libglfw3-dev libgles2-mesa-dev
+
+Run make to build.
