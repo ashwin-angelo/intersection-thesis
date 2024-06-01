@@ -1,0 +1,2 @@
+Added support for a few events.
+Enabled scrolling and dragging to interact with "view"

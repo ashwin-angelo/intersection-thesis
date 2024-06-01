@@ -9,3 +9,4 @@ sudo apt-get install libsdl2-dev
 
 Run make to build.
 Run with run.
+Runs for 5 sec.
