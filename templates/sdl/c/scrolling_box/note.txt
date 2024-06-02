@@ -1,2 +1,8 @@
 Added support for a few events.
 Enabled scrolling and dragging to interact with "view"
+Set up basic TTF stuff
+
+TTF requires these packages:
+
+libsdl2-ttf-2.0-0
+libsdl2-ttf-dev
