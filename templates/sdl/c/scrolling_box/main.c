@@ -3,15 +3,21 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <math.h>
 
 #define WIDTH 1000
 #define HEIGHT 800
 
-#define MAX_SCALE 10.0f
-#define MIN_SCALE 0.1f
+#define MAX_SCALE 100000.0f
+#define MIN_SCALE 0.00001f
 
-/* PIXELS PER "UNIT" */
+// PIXELS PER UNIT
 #define BASE_PPU 100.0f
+
+float rad(float deg)
+{
+  return (deg * M_PI) / 180.0f;
+}
 
 void clean_up(bool sdl, bool ttf, SDL_Window *window, SDL_Renderer *renderer)
 {
@@ -110,11 +116,104 @@ int main (int argc, char **argv)
   mouse.x = mouse.y = motion.x = motion.y = 0;
   float scroll_y  = 0;
 
+
+//////////////////////////////////////////////////////////////////////
+/*
+
+  SIMPLE EQUIRECTANGULAR PROJECTION
+
+  x = radius_earth * longitude * cos( average latitude )
+  y = radius_earth * latitude
+
+  latitude and longitude must be converted to radians
+
+*/
+//////////////////////////////////////////////////////////////////////
+
+  /* NORTHEAST CORNER */
+  float ne_lat = 40.693262476072995;
+  float ne_lon = -73.97384719510481;
+
+  /* SOUTHEAST CORNER */
+  float se_lat = 40.68961102229747;
+  float se_lon = -73.97313177869177;
+
+  /* SOUTHWEST CORNER */
+  float sw_lat = 40.689845032051686;
+  float sw_lon = -73.97863436726685;
+
+  /* NORTHWEST CORNER */
+  float nw_lat = 40.69349946108703; 
+  float nw_lon = -73.97915310771947;
+
+  float avg_lat = (nw_lat + se_lat) / 2;
+  float r = 3958.8; // radius of earth in miles
+
+  float a = cos( rad(avg_lat) );
+  
+  printf("a: %f\n", a);
+
+  SDL_FPoint NE, NW, SE, SW;
+
+  NE.x = r * rad(ne_lon) * a; 
+  NE.y = r * rad(ne_lat) * -1.0f;
+  printf("NE.x: %f NE.y: %f\n", NE.x, NE.y);
+
+  NW.x = r * rad(nw_lon) * a; 
+  NW.y = r * rad(nw_lat) * -1.0f;
+  printf("NW.x: %f NW.y: %f\n", NW.x, NW.y);
+
+  SE.x = r * rad(se_lon) * a; 
+  SE.y = r * rad(se_lat) * -1.0f;
+  printf("SE.x: %f SE.y: %f\n", SE.x, SE.y);
+
+  SW.x = r * rad(sw_lon) * a; 
+  SW.y = r * rad(sw_lat) * -1.0f;
+  printf("SW.x: %f SW.y: %f\n", SW.x, SW.y);
+
+  SDL_FPoint nodes[4];
+  nodes[0] = NE;
+  nodes[1] = NW;
+  nodes[2] = SE;
+  nodes[3] = SW;
+
+  SDL_FRect start_box;
+  SDL_EncloseFPoints(nodes, 4, NULL, &start_box);
+
+  /* THE w/h ARE OFF BY ONE DUE TO A BUG IN EncloseFPoints */
+  start_box.w -= 1;
+  start_box.h -= 1;
+
+  printf("start_x = %f\tstart_y = %f\tstart_w = %f\tstart_h = %f\n",
+    start_box.x, start_box.y, start_box.w, start_box.h);
+  
+  focus.x = start_box.x + start_box.w / 2;
+  focus.y = start_box.y + start_box.h / 2;
+
+  float desired_x_ppu = WIDTH  / (start_box.w * 1.1);
+  float desired_y_ppu = HEIGHT / (start_box.h * 1.1);
+
+  float desired_ppu = desired_x_ppu;
+  if(desired_y_ppu > desired_ppu) desired_ppu = desired_y_ppu;
+
+  pixels_per_unit = desired_ppu;
+  scale = pixels_per_unit / BASE_PPU;
+  view.x = focus.x - ( WIDTH  / 2.0f ) / pixels_per_unit;
+  view.y = focus.y - ( HEIGHT / 2.0f ) / pixels_per_unit;
+
+  printf("PPU: %f\n", pixels_per_unit);
+  printf("scale: %f\n", scale);
+  printf("focus.x: %f\tfocus.y: %f\n", focus.x, focus.y);
+  printf("view.x: %f\tview.y: %f\n", view.x, view.y);
+
   SDL_Rect box;
-  float box_x = -2.0f;
-  float box_y = -2.0f;
-  float box_w = 4.0f;
-  float box_h = 4.0f;
+  float box_x = (focus.x + view.x) / 2;
+  float box_y = (focus.y + view.y) / 2;
+  printf("box_x: %f\tbox_y: %f\n", box_x, box_y);
+  float box_w = (focus.x - view.x);
+  float box_h = (focus.y - view.y);
+
+//////////////////////////////////////////////////////////////////////
 
   while(true)
   {
@@ -202,6 +301,34 @@ int main (int argc, char **argv)
 
     SDL_SetRenderDrawColor(renderer, 0x40, 0x40, 0x40, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(renderer, &box);
+
+/////////////////////////////////////////////////////////
+
+    box.w = 10;
+    box.h = 10;
+
+    box.x = (NE.x - view.x) * pixels_per_unit;
+    box.y = (NE.y - view.y) * pixels_per_unit;
+    SDL_SetRenderDrawColor(renderer, 0xff, 0x00, 0x40, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &box);
+
+    box.x = (NW.x - view.x) * pixels_per_unit;
+    box.y = (NW.y - view.y) * pixels_per_unit;
+    SDL_SetRenderDrawColor(renderer, 0x00, 0xff, 0x40, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &box);
+
+    box.x = (SE.x - view.x) * pixels_per_unit;
+    box.y = (SE.y - view.y) * pixels_per_unit;
+    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0xff, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &box);
+
+    box.x = (SW.x - view.x) * pixels_per_unit;
+    box.y = (SW.y - view.y) * pixels_per_unit;
+    SDL_SetRenderDrawColor(renderer, 0xff, 0xff, 0x00, SDL_ALPHA_OPAQUE);
+    SDL_RenderFillRect(renderer, &box);
+
+/////////////////////////////////////////////////////////
+
 
     SDL_RenderCopy(renderer, text_texture, NULL, &text_rect);
 
