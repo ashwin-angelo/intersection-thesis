@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <math.h>
 
+#include "renderer.h"
+
 #define WIDTH 1000
 #define HEIGHT 800
 
@@ -14,9 +16,25 @@
 // PIXELS PER UNIT
 #define BASE_PPU 100.0f
 
+// radius of earth in miles
+#define R 3958.8
+
+#define MAX_NODES 64
+
 float rad(float deg)
 {
   return (deg * M_PI) / 180.0f;
+}
+
+/* SIMPLE EQUIRECTANGULAR PROJECTION
+  x = radius_earth * longitude * cos( average latitude )
+  y = radius_earth * latitude
+  ( latitude and longitude must be converted to radians ) */
+
+void lat_lon_to_pt(float lat, float lon, SDL_FPoint *p, float aspect_ratio)
+{
+  p->x = R * rad(lon) * aspect_ratio; 
+  p->y = R * rad(lat) * -1.0f;
 }
 
 void clean_up(bool sdl, bool ttf, SDL_Window *window, SDL_Renderer *renderer)
@@ -29,6 +47,8 @@ void clean_up(bool sdl, bool ttf, SDL_Window *window, SDL_Renderer *renderer)
 
 int main (int argc, char **argv)
 {
+
+
   if(SDL_Init(SDL_INIT_VIDEO) != 0)
   {
     fprintf(stderr, "SDL_Init(SDL_INIT_VIDEO) FAILED: %s\n", SDL_GetError());
@@ -116,71 +136,53 @@ int main (int argc, char **argv)
   mouse.x = mouse.y = motion.x = motion.y = 0;
   float scroll_y  = 0;
 
+  // extract nodes
+  SDL_FPoint lat_lon_pairs[MAX_NODES];
+  SDL_FPoint nodes[MAX_NODES];
+  size_t number_of_nodes = 0;
+  float sum_of_lats = 0.0f;
 
-//////////////////////////////////////////////////////////////////////
-/*
+  const char nodes_filename[] = "nodes.txt";
+  FILE* nodes_file = fopen(nodes_filename, "r");
+  if (!nodes_file)
+  {
+    clean_up(true, true, window, renderer);
+    fprintf(stderr, "Failed to open file: %s\n", nodes_filename);
+    return 1;
+  }
+  char* line = NULL;
+  size_t len = 0;
 
-  SIMPLE EQUIRECTANGULAR PROJECTION
+  while( getline(&line, &len, nodes_file) != -1)
+  {
+    // TODO: error check ... and eventually make more flexible
 
-  x = radius_earth * longitude * cos( average latitude )
-  y = radius_earth * latitude
+    printf("%s", line);
+    char * token;
+    token = strtok(line," ,\n");
+    float lat = atof(token);
+    token = strtok(NULL, " ,\n");
+    float lon = atof(token);
 
-  latitude and longitude must be converted to radians
-
-*/
-//////////////////////////////////////////////////////////////////////
-
-  /* NORTHEAST CORNER */
-  float ne_lat = 40.693262476072995;
-  float ne_lon = -73.97384719510481;
-
-  /* SOUTHEAST CORNER */
-  float se_lat = 40.68961102229747;
-  float se_lon = -73.97313177869177;
-
-  /* SOUTHWEST CORNER */
-  float sw_lat = 40.689845032051686;
-  float sw_lon = -73.97863436726685;
-
-  /* NORTHWEST CORNER */
-  float nw_lat = 40.69349946108703; 
-  float nw_lon = -73.97915310771947;
-
-  float avg_lat = (nw_lat + se_lat) / 2;
-  float r = 3958.8; // radius of earth in miles
-
-  float a = cos( rad(avg_lat) );
+    lat_lon_pairs[number_of_nodes].x = lat;
+    lat_lon_pairs[number_of_nodes].y = lon;
+    sum_of_lats += lat;
+    number_of_nodes++;
+  }
   
-  printf("a: %f\n", a);
+  fclose(nodes_file);
+  free(line);
 
-  SDL_FPoint NE, NW, SE, SW;
+  float avg_lat = sum_of_lats / number_of_nodes;
+  float aspect_ratio = cos( rad(avg_lat) );
 
-  NE.x = r * rad(ne_lon) * a; 
-  NE.y = r * rad(ne_lat) * -1.0f;
-  printf("NE.x: %f NE.y: %f\n", NE.x, NE.y);
-
-  NW.x = r * rad(nw_lon) * a; 
-  NW.y = r * rad(nw_lat) * -1.0f;
-  printf("NW.x: %f NW.y: %f\n", NW.x, NW.y);
-
-  SE.x = r * rad(se_lon) * a; 
-  SE.y = r * rad(se_lat) * -1.0f;
-  printf("SE.x: %f SE.y: %f\n", SE.x, SE.y);
-
-  SW.x = r * rad(sw_lon) * a; 
-  SW.y = r * rad(sw_lat) * -1.0f;
-  printf("SW.x: %f SW.y: %f\n", SW.x, SW.y);
-
-  SDL_FPoint nodes[4];
-  nodes[0] = NE;
-  nodes[1] = NW;
-  nodes[2] = SE;
-  nodes[3] = SW;
+  for(int i = 0; i < number_of_nodes; i++)
+    lat_lon_to_pt(lat_lon_pairs[i].x, lat_lon_pairs[i].y, &nodes[i], aspect_ratio);
 
   SDL_FRect start_box;
   SDL_EncloseFPoints(nodes, 4, NULL, &start_box);
-
-  /* THE w/h ARE OFF BY ONE DUE TO A BUG IN EncloseFPoints */
+  
+  /* THE W/H ARE OFF BY ONE DUE TO A BUG IN EncloseFPoints */
   start_box.w -= 1;
   start_box.h -= 1;
 
@@ -200,11 +202,6 @@ int main (int argc, char **argv)
   scale = pixels_per_unit / BASE_PPU;
   view.x = focus.x - ( WIDTH  / 2.0f ) / pixels_per_unit;
   view.y = focus.y - ( HEIGHT / 2.0f ) / pixels_per_unit;
-
-  printf("PPU: %f\n", pixels_per_unit);
-  printf("scale: %f\n", scale);
-  printf("focus.x: %f\tfocus.y: %f\n", focus.x, focus.y);
-  printf("view.x: %f\tview.y: %f\n", view.x, view.y);
 
   SDL_Rect box;
   float box_x = (focus.x + view.x) / 2;
@@ -302,37 +299,20 @@ int main (int argc, char **argv)
     SDL_SetRenderDrawColor(renderer, 0x40, 0x40, 0x40, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(renderer, &box);
 
-/////////////////////////////////////////////////////////
-
     box.w = 10;
     box.h = 10;
 
-    box.x = (NE.x - view.x) * pixels_per_unit;
-    box.y = (NE.y - view.y) * pixels_per_unit;
-    SDL_SetRenderDrawColor(renderer, 0xff, 0x00, 0x40, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &box);
-
-    box.x = (NW.x - view.x) * pixels_per_unit;
-    box.y = (NW.y - view.y) * pixels_per_unit;
-    SDL_SetRenderDrawColor(renderer, 0x00, 0xff, 0x40, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &box);
-
-    box.x = (SE.x - view.x) * pixels_per_unit;
-    box.y = (SE.y - view.y) * pixels_per_unit;
-    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0xff, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &box);
-
-    box.x = (SW.x - view.x) * pixels_per_unit;
-    box.y = (SW.y - view.y) * pixels_per_unit;
-    SDL_SetRenderDrawColor(renderer, 0xff, 0xff, 0x00, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &box);
-
-/////////////////////////////////////////////////////////
-
-
     SDL_RenderCopy(renderer, text_texture, NULL, &text_rect);
 
-    SDL_RenderPresent(renderer);
+    Renderer ren;
+    ren.renderer = renderer;
+
+    for(int i = 0; i < number_of_nodes; i++)
+    {
+      draw_node(&box, &nodes[i], &view, pixels_per_unit, &ren);
+    }
+
+    display(&ren);
 
     if(quit) break;
   }
