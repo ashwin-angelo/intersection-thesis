@@ -6,6 +6,7 @@
 #include <math.h>
 
 #include "renderer.h"
+#include "viewport.h"
 
 #define WIDTH 1000
 #define HEIGHT 800
@@ -37,9 +38,10 @@ void lat_lon_to_pt(float lat, float lon, SDL_FPoint *p, float aspect_ratio)
   p->y = R * rad(lat) * -1.0f;
 }
 
-void clean_up(bool sdl, bool ttf, SDL_Window *window, SDL_Renderer *renderer)
+// void clean_up(bool sdl, bool ttf, SDL_Window *window, SDL_Renderer *renderer)
+void clean_up(bool sdl, bool ttf, SDL_Window *window, Renderer *renderer)
 {
-  if(renderer)  SDL_DestroyRenderer(renderer);
+  if(renderer)  destroyRenderer(renderer);
   if(window)    SDL_DestroyWindow(window);
   if(ttf)       TTF_Quit();
   if(sdl)       SDL_Quit();
@@ -47,7 +49,6 @@ void clean_up(bool sdl, bool ttf, SDL_Window *window, SDL_Renderer *renderer)
 
 int main (int argc, char **argv)
 {
-
 
   if(SDL_Init(SDL_INIT_VIDEO) != 0)
   {
@@ -67,14 +68,10 @@ int main (int argc, char **argv)
     return 1;
   }
 
-  SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, 
-    SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
-
+  Renderer *renderer = createRenderer(window);
   if(!renderer)
   {
-    fprintf(stderr, "SDL_CreateRenderer FAILED: %s\n", SDL_GetError());
     clean_up(true, false, NULL, NULL);
-    return 1;
   }
 
   if(TTF_Init() < 0)
@@ -106,13 +103,7 @@ int main (int argc, char **argv)
     return 1;
   }
 
-  SDL_Rect text_rect;
-  text_rect.x = (WIDTH  - text_surface->w) / 2;
-  text_rect.y = (HEIGHT - text_surface->h) / 2;
-  text_rect.w = text_surface->w;
-  text_rect.h = text_surface->h;
-
-  SDL_Texture *text_texture = SDL_CreateTextureFromSurface(renderer, text_surface);
+  SDL_Texture *text_texture = SDL_CreateTextureFromSurface(renderer->renderer, text_surface);
   SDL_FreeSurface(text_surface);
 
   if(!text_texture)
@@ -124,13 +115,7 @@ int main (int argc, char **argv)
 
   bool quit  = false;
 
-  float scale = 1.0f;
-  float pixels_per_unit = BASE_PPU * scale;
-
-  SDL_FPoint focus, view;
-  focus.x = focus.y = 0.0f;
-  view.x = focus.x - ( WIDTH  / 2.0f ) / pixels_per_unit;
-  view.y = focus.y - ( HEIGHT / 2.0f ) / pixels_per_unit;
+  Viewport *vw = createViewport(WIDTH, HEIGHT, BASE_PPU);
 
   SDL_Point mouse, motion;
   mouse.x = mouse.y = motion.x = motion.y = 0;
@@ -153,9 +138,11 @@ int main (int argc, char **argv)
   char* line = NULL;
   size_t len = 0;
 
+
   while( getline(&line, &len, nodes_file) != -1)
   {
     // TODO: error check ... and eventually make more flexible
+    // NOTE: no I do not think I'll be able to remember how strtok works
 
     printf("%s", line);
     char * token;
@@ -181,7 +168,7 @@ int main (int argc, char **argv)
 
   SDL_FRect start_box;
   SDL_EncloseFPoints(nodes, 4, NULL, &start_box);
-  
+ 
   /* THE W/H ARE OFF BY ONE DUE TO A BUG IN EncloseFPoints */
   start_box.w -= 1;
   start_box.h -= 1;
@@ -189,26 +176,35 @@ int main (int argc, char **argv)
   printf("start_x = %f\tstart_y = %f\tstart_w = %f\tstart_h = %f\n",
     start_box.x, start_box.y, start_box.w, start_box.h);
   
-  focus.x = start_box.x + start_box.w / 2;
-  focus.y = start_box.y + start_box.h / 2;
+  vw->focus.x = start_box.x + start_box.w / 2;
+  vw->focus.y = start_box.y + start_box.h / 2;
 
-  float desired_x_ppu = WIDTH  / (start_box.w * 1.1);
-  float desired_y_ppu = HEIGHT / (start_box.h * 1.1);
+  // im not even sure this logic works for all scenarios
+  // like if theres one extreme point off the map somewhere...
+  float desired_x_ppu = vw->width  / (start_box.w * 1.5);
+  float desired_y_ppu = vw->height / (start_box.h * 1.5);
 
   float desired_ppu = desired_x_ppu;
   if(desired_y_ppu > desired_ppu) desired_ppu = desired_y_ppu;
 
-  pixels_per_unit = desired_ppu;
-  scale = pixels_per_unit / BASE_PPU;
-  view.x = focus.x - ( WIDTH  / 2.0f ) / pixels_per_unit;
-  view.y = focus.y - ( HEIGHT / 2.0f ) / pixels_per_unit;
+  vw->pixels_per_unit = desired_ppu;
+  vw->scale = vw->pixels_per_unit / BASE_PPU;
+  vw->view.x = vw->focus.x - ( WIDTH  / 2.0f ) / vw->pixels_per_unit;
+  vw->view.y = vw->focus.y - ( HEIGHT / 2.0f ) / vw->pixels_per_unit;
 
   SDL_Rect box;
-  float box_x = (focus.x + view.x) / 2;
-  float box_y = (focus.y + view.y) / 2;
+
+  float box_x = (vw->focus.x + vw->view.x) / 2;
+  float box_y = (vw->focus.y + vw->view.y) / 2;
   printf("box_x: %f\tbox_y: %f\n", box_x, box_y);
-  float box_w = (focus.x - view.x);
-  float box_h = (focus.y - view.y);
+  float box_w = (vw->focus.x - vw->view.x);
+  float box_h = (vw->focus.y - vw->view.y);
+
+  SDL_Rect text_rect;
+  text_rect.x = (WIDTH  - text_surface->w) / 2;
+  text_rect.y = (HEIGHT - text_surface->h) / 2;
+  text_rect.w = text_surface->w;
+  text_rect.h = text_surface->h;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -260,63 +256,47 @@ int main (int argc, char **argv)
     if(motion.x || motion.y)
     {
       printf("Dragging: motion.x: %d\tmotion.y: %d\n", motion.x, motion.y);
-      focus.x -= motion.x / pixels_per_unit;
-      focus.y -= motion.y / pixels_per_unit;
-      view.x = focus.x - ( WIDTH  / 2.0f ) / pixels_per_unit;
-      view.y = focus.y - ( HEIGHT / 2.0f ) / pixels_per_unit;
+      handleMotion(motion, vw);
       motion.x = motion.y = 0;
     }
 
     if(scroll_y)
     {
       printf("Scrolling (%d)\tmouse.x: %d\tmouse.y: %d\n", (int)scroll_y, mouse.x, mouse.y);
-
-      if(scroll_y < 0.0f && scale * 0.8f > MIN_SCALE) scale *= 0.8f;
-      else if (scroll_y > 0.0f && scale * 1.25f < MAX_SCALE) scale *= 1.25f;
-
+      handleScroll(scroll_y, mouse, MIN_SCALE, MAX_SCALE, vw);
       scroll_y = 0.0f;
-
-      SDL_FPoint cursor;
-      cursor.x = mouse.x / pixels_per_unit + view.x;
-      cursor.y = mouse.y / pixels_per_unit + view.y;
-
-      pixels_per_unit = BASE_PPU * scale;
-
-      view.x = cursor.x - mouse.x / pixels_per_unit;
-      view.y = cursor.y - mouse.y / pixels_per_unit;
-      focus.x = view.x + (WIDTH  / 2.0f) / pixels_per_unit;
-      focus.y = view.y + (HEIGHT / 2.0f) / pixels_per_unit;
     }
 
-    box.x = (box_x - view.x) * pixels_per_unit;
-    box.y = (box_y - view.y) * pixels_per_unit;
-    box.w = box_w * pixels_per_unit;
-    box.h = box_h * pixels_per_unit;
+    box.x = (box_x - vw->view.x) * vw->pixels_per_unit;
+    box.y = (box_y - vw->view.y) * vw->pixels_per_unit;
+    box.w = box_w * vw->pixels_per_unit;
+    box.h = box_h * vw->pixels_per_unit;
 
-    SDL_SetRenderDrawColor(renderer, 0x20, 0x20, 0x20, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(renderer);
+    set_render_draw_color(0x20, 0x20, 0x20, renderer);
+    clear(renderer);
 
-    SDL_SetRenderDrawColor(renderer, 0x40, 0x40, 0x40, SDL_ALPHA_OPAQUE);
-    SDL_RenderFillRect(renderer, &box);
+    set_render_draw_color(0x40, 0x40, 0x40, renderer);
+    SDL_RenderFillRect(renderer->renderer, &box);
 
     box.w = 10;
     box.h = 10;
 
-    SDL_RenderCopy(renderer, text_texture, NULL, &text_rect);
-
-    Renderer ren;
-    ren.renderer = renderer;
+    SDL_RenderCopy(renderer->renderer, text_texture, NULL, &text_rect);
 
     for(int i = 0; i < number_of_nodes; i++)
     {
-      draw_node(&box, &nodes[i], &view, pixels_per_unit, &ren);
+      draw_node(&box, &nodes[i], &(vw->view), vw->pixels_per_unit, renderer);
+      if(i > 0 && i < number_of_nodes) draw_line(&nodes[i-1], &nodes[i], &(vw->view), vw->pixels_per_unit, renderer);
     }
 
-    display(&ren);
+    display(renderer);
 
     if(quit) break;
   }
 
   clean_up(true, true, window, renderer);
+
+  destroyViewport(vw);
+
   return 0;
 }
