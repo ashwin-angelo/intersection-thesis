@@ -10,7 +10,7 @@ typedef struct Viewport {
 
 } Viewport;
 
-struct Viewport *createViewport(uint32_t w, uint32_t h, float base_ppu);
+Viewport *createViewport(uint32_t w, uint32_t h, float base_ppu);
 void destroyViewport(Viewport *vw);
 
 void handleMotion(SDL_Point motion, Viewport *vw);
